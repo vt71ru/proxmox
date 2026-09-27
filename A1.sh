@@ -19,9 +19,10 @@
 #   OpenWrt 25.x
 #
 # Особенности:
-#   - не требует команды hostname
+#   - не требует отдельной команды hostname
 #   - корректно работает при отсутствии bridge
 #   - использует UCI/sysfs как fallback
+#   - сохраняет полный отчёт в /root/network-audit
 #
 # ============================================================
 
@@ -152,7 +153,11 @@ run_cmd()
         if [ -d /sys/class/net/br-lan ]; then
 
             printf '\nbr-lan:\n'
+
+            printf 'Operational state:\n'
             cat /sys/class/net/br-lan/operstate 2>/dev/null || true
+
+            printf 'MTU:\n'
             cat /sys/class/net/br-lan/mtu 2>/dev/null || true
 
             printf '\nBridge ports:\n'
@@ -183,10 +188,12 @@ run_cmd()
         printf 'Проверяем VLAN через UCI и sysfs.\n'
 
         printf '\n# UCI VLAN-related configuration\n'
+
         uci show network 2>/dev/null \
             | grep -Ei 'vlan|bridge|ports|device' || true
 
         printf '\n# /sys/class/net VLAN devices\n'
+
         find /sys/class/net -maxdepth 1 -type l \
             -printf '%f\n' 2>/dev/null \
             | sort
@@ -278,16 +285,24 @@ run_cmd()
 
     section "15. WAN — ETH1"
 
-    run_cmd "ip addr show dev eth1"
+    if ip link show dev eth1 >/dev/null 2>&1; then
 
-    printf '\nLink state:\n'
-    cat /sys/class/net/eth1/operstate 2>/dev/null || true
+        run_cmd "ip addr show dev eth1"
 
-    printf '\nMTU:\n'
-    cat /sys/class/net/eth1/mtu 2>/dev/null || true
+        printf '\nLink state:\n'
+        cat /sys/class/net/eth1/operstate 2>/dev/null || true
 
-    printf '\nMAC:\n'
-    cat /sys/class/net/eth1/address 2>/dev/null || true
+        printf '\nMTU:\n'
+        cat /sys/class/net/eth1/mtu 2>/dev/null || true
+
+        printf '\nMAC:\n'
+        cat /sys/class/net/eth1/address 2>/dev/null || true
+
+    else
+
+        printf 'Интерфейс eth1 отсутствует.\n'
+
+    fi
 
 
     # ========================================================
@@ -296,10 +311,18 @@ run_cmd()
 
     section "16. LAN BRIDGE — BR-LAN"
 
-    run_cmd "ip addr show dev br-lan"
+    if ip link show dev br-lan >/dev/null 2>&1; then
 
-    printf '\nBridge ports:\n'
-    ls -1 /sys/class/net/br-lan/brif 2>/dev/null || true
+        run_cmd "ip addr show dev br-lan"
+
+        printf '\nBridge ports:\n'
+        ls -1 /sys/class/net/br-lan/brif 2>/dev/null || true
+
+    else
+
+        printf 'Интерфейс br-lan отсутствует.\n'
+
+    fi
 
 
     # ========================================================
@@ -308,7 +331,7 @@ run_cmd()
 
     section "17. DHCP SUMMARY"
 
-    printf '\nLAN DHCP:\n'
+    printf '\nLAN DHCP interface:\n'
     uci -q get dhcp.lan.interface 2>/dev/null || true
 
     printf '\nDHCP start:\n'
@@ -327,7 +350,15 @@ run_cmd()
 
     section "18. DNS"
 
-    run_cmd "cat /etc/resolv.conf"
+    if [ -f /etc/resolv.conf ]; then
+
+        run_cmd "cat /etc/resolv.conf"
+
+    else
+
+        printf '/etc/resolv.conf отсутствует.\n'
+
+    fi
 
 
     # ========================================================
@@ -337,10 +368,16 @@ run_cmd()
     section "19. DNSMASQ"
 
     if pidof dnsmasq >/dev/null 2>&1; then
+
         printf 'dnsmasq: RUNNING\n'
+
+        printf 'PID:\n'
         pidof dnsmasq
+
     else
+
         printf 'dnsmasq: NOT RUNNING\n'
+
     fi
 
 
@@ -351,9 +388,13 @@ run_cmd()
     section "20. FIREWALL SERVICE"
 
     if [ -x /etc/init.d/firewall ]; then
+
         /etc/init.d/firewall status 2>&1 || true
+
     else
+
         printf '/etc/init.d/firewall отсутствует.\n'
+
     fi
 
 
@@ -381,9 +422,13 @@ run_cmd()
     section "22. DHCP LEASES"
 
     if [ -f /tmp/dhcp.leases ]; then
+
         run_cmd "cat /tmp/dhcp.leases"
+
     else
+
         printf '/tmp/dhcp.leases отсутствует.\n'
+
     fi
 
 
@@ -406,7 +451,7 @@ run_cmd()
 
         run_cmd "ss -lntup"
 
-    elif command -v netstat >/dev/null 2>&1 then
+    elif command -v netstat >/dev/null 2>&1; then
 
         run_cmd "netstat -lntup"
 
@@ -424,13 +469,30 @@ run_cmd()
     section "25. ОСНОВНЫЕ CONFIG FILES"
 
     printf '\n/etc/config/network:\n'
-    cat /etc/config/network
+
+    if [ -f /etc/config/network ]; then
+        cat /etc/config/network
+    else
+        printf '/etc/config/network отсутствует.\n'
+    fi
+
 
     printf '\n/etc/config/dhcp:\n'
-    cat /etc/config/dhcp
+
+    if [ -f /etc/config/dhcp ]; then
+        cat /etc/config/dhcp
+    else
+        printf '/etc/config/dhcp отсутствует.\n'
+    fi
+
 
     printf '\n/etc/config/firewall:\n'
-    cat /etc/config/firewall
+
+    if [ -f /etc/config/firewall ]; then
+        cat /etc/config/firewall
+    else
+        printf '/etc/config/firewall отсутствует.\n'
+    fi
 
 
     # ========================================================
@@ -442,35 +504,69 @@ run_cmd()
     printf '\nHostname:\n'
     printf '%s\n' "$HOST"
 
+
     printf '\nModel:\n'
+
     ubus call system board 2>/dev/null \
         | grep '"model"' || true
 
+
     printf '\nOpenWrt:\n'
+
     ubus call system board 2>/dev/null \
         | grep '"description"' || true
 
+
     printf '\nWAN device:\n'
+
     uci -q get network.wan.device 2>/dev/null || true
 
+
     printf '\nWAN protocol:\n'
+
     uci -q get network.wan.proto 2>/dev/null || true
 
+
     printf '\nWAN IPv4:\n'
-    ifstatus wan 2>/dev/null \
-        | grep -A3 '"ipv4-address"' || true
+
+    if command -v ifstatus >/dev/null 2>&1; then
+
+        ifstatus wan 2>/dev/null \
+            | grep -A3 '"ipv4-address"' || true
+
+    else
+
+        printf 'ifstatus отсутствует.\n'
+
+    fi
+
 
     printf '\nDefault route:\n'
+
     ip route | grep '^default' || true
 
+
     printf '\nLAN address:\n'
+
     uci -q get network.lan.ipaddr 2>/dev/null || true
 
+
     printf '\nLAN device:\n'
+
     uci -q get network.lan.device 2>/dev/null || true
 
+
     printf '\nLAN bridge ports:\n'
-    ls -1 /sys/class/net/br-lan/brif 2>/dev/null || true
+
+    if [ -d /sys/class/net/br-lan/brif ]; then
+
+        ls -1 /sys/class/net/br-lan/brif 2>/dev/null || true
+
+    else
+
+        printf 'br-lan отсутствует.\n'
+
+    fi
 
 
     # ========================================================
@@ -487,6 +583,7 @@ run_cmd()
 
 printf '\n'
 printf '%s\n' '============================================================'
-printf 'A1 завершён.\n'
+printf 'A1 завершён.'
+printf '\n'
 printf 'Отчёт: %s\n' "$OUTFILE"
 printf '%s\n' '============================================================'
